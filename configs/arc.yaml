@@ -17,7 +17,7 @@ model:
 train:
   lr: 1e-4
   n_warmup: 2000
-  n_batches: 100000
+  n_batches: 25000
   batch_size: 32
   wt_decay: 0.1
   grad_norm: 1.0
@@ -29,9 +29,9 @@ train:
 
 arc:
   data_dir: data
-  n_aug: 1000
+  n_aug: 32
   n_eval_aug: 64
   puzzle_lr: 1e-2
   puzzle_wt_decay: 0.1
-  eval_every: 10000
+  eval_every: 2000
   eval_batch_size: 64

@@ -132,7 +132,6 @@ class GDN2(nn.Module):
         q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
         if self.cfg.use_gamma:
             v = torch.sigmoid(self.Wc(z).float()).view(b, s, n, d) * v
-        bk = k
         if self.cfg.use_beta:
             bk = torch.sigmoid(self.Wb(z).float()).view(b, s, n, d) * k
 
@@ -148,9 +147,10 @@ class GDN2(nn.Module):
             else:
                 if self.cfg.use_alpha:
                     S = a.unsqueeze(-1) * S
-                S = S - k.unsqueeze(-1) * torch.einsum(
-                    "...i,...ij->...j", bk, S
-                ).unsqueeze(-2)
+                if self.cfg.use_beta:
+                    S = S - k.unsqueeze(-1) * torch.einsum(
+                        "...i,...ij->...j", bk, S
+                    ).unsqueeze(-2)
                 S = S + write
 
             h = torch.einsum("...i,...ij->...j", q, S).reshape(b, s, n * d)
