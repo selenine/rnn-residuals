@@ -36,3 +36,4 @@ class TrainConfig:
     data_dir: str
     eval_every: int
     eval_batches: int
+    sample_tokens: int

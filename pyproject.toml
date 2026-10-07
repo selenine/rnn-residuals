@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 rnn-residuals = "rnn_residuals:main"
+rnn-residuals-sample = "rnn_residuals.sample:main"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]

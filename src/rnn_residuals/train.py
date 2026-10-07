@@ -1,9 +1,10 @@
-import math
+import html
 import os
 import urllib.request
 from dataclasses import asdict
 
 import torch
+import wandb
 from accelerate import Accelerator
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
@@ -11,6 +12,7 @@ from tqdm import tqdm
 
 from rnn_residuals.config import TrainConfig, TransformerConfig
 from rnn_residuals.nn.layers import LoopedTransformer
+from rnn_residuals.sample import generate
 
 SHAKESPEARE_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
 
@@ -51,11 +53,7 @@ class RandomWindows(IterableDataset):
 
 def lr_lambda(cfg: TrainConfig):
     def fn(step: int) -> float:
-        if step < cfg.n_warmup:
-            return (step + 1) / cfg.n_warmup
-
-        t = (step - cfg.n_warmup) / max(1, cfg.n_batches - cfg.n_warmup)
-        return 0.5 * (1 + math.cos(math.pi * min(t, 1.0)))
+        return min(1.0, (step + 1) / cfg.n_warmup)
 
     return fn
 
@@ -149,6 +147,18 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
             accelerator.log({"val_loss": val_loss}, step=step)
             if accelerator.is_main_process:
                 pbar.write(f"step {step} | val_loss {val_loss:.4g}")
+
+                if train_cfg.sample_tokens > 0:
+                    sample = generate(
+                        accelerator.unwrap_model(model),
+                        chars,
+                        n_tokens=train_cfg.sample_tokens,
+                    )
+                    pbar.write(f"--- sample @ step {step} ---\n{sample}\n---")
+                    accelerator.get_tracker("wandb", unwrap=True).log(
+                        {"sample": wandb.Html(f"<pre>{html.escape(sample)}</pre>")},
+                        step=step,
+                    )
 
         if step % train_cfg.save_every == 0 or step == train_cfg.n_batches:
             accelerator.wait_for_everyone()

@@ -24,3 +24,4 @@ train:
   data_dir: data
   eval_every: 250
   eval_batches: 20
+  sample_tokens: 300
