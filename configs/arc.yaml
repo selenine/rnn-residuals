@@ -3,7 +3,7 @@ model:
   n_vocab: 12
   n_layers: 4
   n_heads: 16
-  n_loops: 256
+  n_loops: 64
   n_grad_loops: 4
   d_model: 512
   d_head: 32
