@@ -2227,6 +2227,7 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "datasets" },
+    { name = "pyyaml" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
@@ -2237,6 +2238,7 @@ dependencies = [
 requires-dist = [
     { name = "accelerate", specifier = ">=1.15.0" },
     { name = "datasets", specifier = ">=5.1.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "torch", specifier = ">=2.14.1" },
     { name = "tqdm", specifier = ">=4.70.1" },
     { name = "transformers", specifier = ">=5.19.0" },

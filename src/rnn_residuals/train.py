@@ -131,31 +131,3 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
 
     pbar.close()
     accelerator.end_training()
-
-
-def main() -> None:
-    model_cfg = TransformerConfig(
-        n_ctx=256,
-        n_vocab=50257,
-        n_layers=2,
-        n_heads=4,
-        n_loops=4,
-        d_model=128,
-        d_head=32,
-        d_mlp=512,
-    )
-    train_cfg = TrainConfig(
-        lr=1e-3,
-        n_warmup=200,
-        n_batches=10_000,
-        batch_size=8,
-        wt_decay=0.1,
-        grad_norm=1.0,
-        mixed_precision="no",
-        save_every=1000,
-        save_path="checkpoints",
-        wandb_name="gdn2-l2-x4",
-        log_every=10,
-    )
-
-    train(model_cfg, train_cfg)
