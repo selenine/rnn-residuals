@@ -3,12 +3,12 @@ import argparse
 import torch
 
 from rnn_residuals.config import TransformerConfig
-from rnn_residuals.nn.layers import LoopedTransformer
+from rnn_residuals.nn.layers import Transformer
 
 
 @torch.no_grad()
 def generate(
-    model: LoopedTransformer,
+    model: Transformer,
     chars: list[str],
     prompt: str = "\n",
     n_tokens: int = 500,
@@ -38,7 +38,6 @@ def main() -> None:
     parser.add_argument("--prompt", default="\n")
     parser.add_argument("--n-tokens", type=int, default=500)
     parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--n-loops", type=int, default=None)
     parser.add_argument(
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
@@ -46,10 +45,8 @@ def main() -> None:
 
     ckpt = torch.load(args.checkpoint, map_location=args.device)
     cfg = TransformerConfig(**ckpt["cfg"])
-    if args.n_loops is not None:
-        cfg.n_loops = args.n_loops
 
-    model = LoopedTransformer(cfg).to(args.device)
+    model = Transformer(cfg).to(args.device)
     model.load_state_dict(ckpt["model"])
 
     print(generate(model, ckpt["chars"], args.prompt, args.n_tokens, args.temperature))

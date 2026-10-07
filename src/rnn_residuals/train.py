@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 from tqdm import tqdm
 
 from rnn_residuals.config import TrainConfig, TransformerConfig
-from rnn_residuals.nn.layers import LoopedTransformer
+from rnn_residuals.nn.layers import Transformer
 from rnn_residuals.sample import generate
 
 SHAKESPEARE_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
@@ -85,7 +85,7 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
         for row in starts.tolist()
     ]
 
-    model = LoopedTransformer(model_cfg)
+    model = Transformer(model_cfg)
 
     decay = [p for p in model.parameters() if p.dim() >= 2]
     no_decay = [p for p in model.parameters() if p.dim() < 2]

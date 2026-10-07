@@ -3,7 +3,6 @@ model:
   n_vocab: 65
   n_layers: 8
   n_heads: 4
-  n_loops: 1
   d_model: 128
   d_head: 32
   d_mlp: 512
@@ -19,7 +18,7 @@ train:
   mixed_precision: "no"
   save_every: 1000
   save_path: checkpoints/shakespeare_gdn2
-  wandb_name: shakespeare-gdn2-l2-x4
+  wandb_name: shakespeare-gdn2-l8
   log_every: 10
   data_dir: data
   eval_every: 250

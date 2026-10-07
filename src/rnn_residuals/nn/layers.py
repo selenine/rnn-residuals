@@ -94,12 +94,16 @@ class GDN2(nn.Module):
     def __init__(
         self,
         cfg: TransformerConfig,
+        first: bool = False,
     ) -> None:
         super().__init__()
 
         assert cfg.n_heads * cfg.d_head == cfg.d_model
         self.cfg = cfg
         n, d = cfg.n_heads, cfg.d_head
+        self.use_alpha = cfg.use_alpha and not first
+        self.use_beta = cfg.use_beta and not first
+        self.use_gamma = cfg.use_gamma
 
         self.Wqkv = nn.Linear(cfg.d_model, 3 * n * d, bias=False)
         self.qk_bias = nn.Parameter(torch.randn(2 * n * d))
@@ -107,17 +111,17 @@ class GDN2(nn.Module):
         nn.init.kaiming_normal_(self.Wqkv.weight)
         nn.init.zeros_(self.Wqkv.weight[: 2 * n * d])
 
-        if cfg.use_alpha:
+        if self.use_alpha:
             self.Wa = nn.Linear(cfg.d_model, n * d, bias=False)
             nn.init.zeros_(self.Wa.weight)
             self.A_log = nn.Parameter(torch.zeros(n * d))
             self.dt_bias = nn.Parameter(torch.full((n * d,), -18.0))
 
-        if cfg.use_beta:
+        if self.use_beta:
             self.Wb = nn.Linear(cfg.d_model, n * d, bias=True)
             nn.init.zeros_(self.Wb.bias)
 
-        if cfg.use_gamma:
+        if self.use_gamma:
             self.Wc = nn.Linear(cfg.d_model, n * d, bias=True)
             nn.init.zeros_(self.Wc.bias)
 
@@ -130,12 +134,12 @@ class GDN2(nn.Module):
         q, k = (qk + self.qk_bias).view(b, s, 2, n, d).unbind(2)
         v = v.view(b, s, n, d)
         q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
-        if self.cfg.use_gamma:
+        if self.use_gamma:
             v = torch.sigmoid(self.Wc(z).float()).view(b, s, n, d) * v
-        if self.cfg.use_beta:
+        if self.use_beta:
             bk = torch.sigmoid(self.Wb(z).float()).view(b, s, n, d) * k
 
-        if self.cfg.use_alpha:
+        if self.use_alpha:
             dt = F.softplus(self.Wa(z).float() + self.dt_bias)
             a = torch.exp(-self.A_log.exp() * dt).view(b, s, n, d)
 
@@ -145,9 +149,9 @@ class GDN2(nn.Module):
             if S is None:
                 S = write
             else:
-                if self.cfg.use_alpha:
+                if self.use_alpha:
                     S = a.unsqueeze(-1) * S
-                if self.cfg.use_beta:
+                if self.use_beta:
                     S = S - k.unsqueeze(-1) * torch.einsum(
                         "...i,...ij->...j", bk, S
                     ).unsqueeze(-2)
@@ -162,15 +166,20 @@ class AttnRes(nn.Module):
     def __init__(
         self,
         cfg: TransformerConfig,
+        first: bool = False,
     ) -> None:
         super().__init__()
 
-        self.query = nn.Parameter(torch.zeros(cfg.d_model))
+        if not first:
+            self.query = nn.Parameter(torch.zeros(cfg.d_model))
 
     def forward(
         self, S: tuple[torch.Tensor, ...] | None, z: torch.Tensor
     ) -> tuple[tuple[torch.Tensor, ...], torch.Tensor]:
-        S = (S or ()) + (z,)
+        if S is None:
+            return (z,), z.float()
+
+        S = S + (z,)
         V = torch.stack(S, dim=-2)
         logits = F.rms_norm(V, (V.shape[-1],)) @ self.query.to(V.dtype)
         h = torch.einsum("...t,...td->...d", logits.float().softmax(-1).to(V.dtype), V)
@@ -200,7 +209,7 @@ class Block(nn.Module):
         return S, h
 
 
-class LoopedTransformer(nn.Module):
+class Transformer(nn.Module):
     def __init__(
         self,
         cfg: TransformerConfig,
@@ -210,7 +219,7 @@ class LoopedTransformer(nn.Module):
         self.cfg = cfg
 
         self.embed = nn.Embedding(cfg.n_vocab, cfg.d_model)
-        self.inject_res = RESIDUALS[cfg.residual](cfg)
+        self.embed_res = RESIDUALS[cfg.residual](cfg, first=True)
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.RMSNorm(cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.n_vocab, bias=False)
@@ -221,17 +230,11 @@ class LoopedTransformer(nn.Module):
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
         x = self.embed(tokens)
 
-        S = None
-        grad_from = self.cfg.n_loops - (self.cfg.n_grad_loops or self.cfg.n_loops)
-        grad = torch.is_grad_enabled()
-
-        for i in range(self.cfg.n_loops):
-            with torch.set_grad_enabled(grad and i >= grad_from):
-                S, h = self.inject_res(S, x)
-                for block in self.blocks:
-                    if self.cfg.grad_ckpt and torch.is_grad_enabled():
-                        S, h = checkpoint(block, S, h, use_reentrant=False)
-                    else:
-                        S, h = block(S, h)
+        S, h = self.embed_res(None, x)
+        for block in self.blocks:
+            if self.cfg.grad_ckpt and torch.is_grad_enabled():
+                S, h = checkpoint(block, S, h, use_reentrant=False)
+            else:
+                S, h = block(S, h)
 
         return self.unembed(self.norm(h))
