@@ -3,7 +3,7 @@ model:
   n_vocab: 12
   n_layers: 4
   n_heads: 16
-  n_loops: 64
+  n_loops: 16
   n_grad_loops: 4
   d_model: 512
   d_head: 32
@@ -16,9 +16,9 @@ model:
 
 train:
   lr: 1e-4
-  n_warmup: 2000
-  n_batches: 25000
-  batch_size: 32
+  n_warmup: 500
+  n_batches: 10000
+  batch_size: 128
   wt_decay: 0.1
   grad_norm: 1.0
   mixed_precision: bf16
