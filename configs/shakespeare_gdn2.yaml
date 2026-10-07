@@ -1,0 +1,26 @@
+model:
+  n_ctx: 256
+  n_vocab: 65
+  n_layers: 2
+  n_heads: 4
+  n_loops: 4
+  d_model: 128
+  d_head: 32
+  d_mlp: 512
+  residual: gdn2
+
+train:
+  lr: 1e-3
+  n_warmup: 200
+  n_batches: 5000
+  batch_size: 64
+  wt_decay: 0.1
+  grad_norm: 1.0
+  mixed_precision: "no"
+  save_every: 1000
+  save_path: checkpoints/shakespeare_gdn2
+  wandb_name: shakespeare-gdn2-l2-x4
+  log_every: 10
+  data_dir: data
+  eval_every: 250
+  eval_batches: 20

@@ -11,8 +11,8 @@ class TransformerConfig:
     d_model: int
     d_head: int
     d_mlp: int
+    residual: str = "gdn2"
     causal: bool = True
-    n_puzzles: int = 0
     grad_ckpt: bool = False
     n_grad_loops: int | None = None
     use_alpha: bool = True
@@ -33,14 +33,6 @@ class TrainConfig:
     save_path: str
     wandb_name: str
     log_every: int
-
-
-@dataclass
-class ArcConfig:
     data_dir: str
-    n_aug: int
-    n_eval_aug: int
-    puzzle_lr: float
-    puzzle_wt_decay: float
     eval_every: int
-    eval_batch_size: int
+    eval_batches: int

@@ -158,6 +158,29 @@ class GDN2(nn.Module):
         return S, h
 
 
+class AttnRes(nn.Module):
+    def __init__(
+        self,
+        cfg: TransformerConfig,
+    ) -> None:
+        super().__init__()
+
+        self.query = nn.Parameter(torch.zeros(cfg.d_model))
+
+    def forward(
+        self, S: tuple[torch.Tensor, ...] | None, z: torch.Tensor
+    ) -> tuple[tuple[torch.Tensor, ...], torch.Tensor]:
+        S = (S or ()) + (z,)
+        V = torch.stack(S, dim=-2)
+        logits = F.rms_norm(V, (V.shape[-1],)) @ self.query.to(V.dtype)
+        h = torch.einsum("...t,...td->...d", logits.float().softmax(-1).to(V.dtype), V)
+
+        return S, h.float()
+
+
+RESIDUALS = {"gdn2": GDN2, "attnres": AttnRes}
+
+
 class Block(nn.Module):
     def __init__(
         self,
@@ -167,14 +190,12 @@ class Block(nn.Module):
 
         self.attn = MHSA(cfg)
         self.mlp = MLP(cfg)
-        self.attn_gdn = GDN2(cfg)
-        self.mlp_gdn = GDN2(cfg)
+        self.attn_res = RESIDUALS[cfg.residual](cfg)
+        self.mlp_res = RESIDUALS[cfg.residual](cfg)
 
-    def forward(
-        self, S: torch.Tensor, h: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        S, h = self.attn_gdn(S, self.attn(h))
-        S, h = self.mlp_gdn(S, self.mlp(h))
+    def forward(self, S, h: torch.Tensor):
+        S, h = self.attn_res(S, self.attn(h))
+        S, h = self.mlp_res(S, self.mlp(h))
 
         return S, h
 
@@ -189,7 +210,7 @@ class LoopedTransformer(nn.Module):
         self.cfg = cfg
 
         self.embed = nn.Embedding(cfg.n_vocab, cfg.d_model)
-        self.inject_gdn = GDN2(cfg)
+        self.inject_res = RESIDUALS[cfg.residual](cfg)
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.RMSNorm(cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.n_vocab, bias=False)
@@ -197,16 +218,8 @@ class LoopedTransformer(nn.Module):
         nn.init.normal_(self.embed.weight, std=1.0)
         nn.init.normal_(self.unembed.weight, std=cfg.d_model**-0.5)
 
-        if cfg.n_puzzles > 0:
-            self.puzzle_embed = nn.Embedding(cfg.n_puzzles, cfg.d_model)
-            nn.init.zeros_(self.puzzle_embed.weight)
-
-    def forward(
-        self, tokens: torch.Tensor, puzzle_ids: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
         x = self.embed(tokens)
-        if puzzle_ids is not None:
-            x = torch.cat([self.puzzle_embed(puzzle_ids).unsqueeze(1), x], dim=1)
 
         S = None
         grad_from = self.cfg.n_loops - (self.cfg.n_grad_loops or self.cfg.n_loops)
@@ -214,14 +227,11 @@ class LoopedTransformer(nn.Module):
 
         for i in range(self.cfg.n_loops):
             with torch.set_grad_enabled(grad and i >= grad_from):
-                S, h = self.inject_gdn(S, x)
+                S, h = self.inject_res(S, x)
                 for block in self.blocks:
                     if self.cfg.grad_ckpt and torch.is_grad_enabled():
                         S, h = checkpoint(block, S, h, use_reentrant=False)
                     else:
                         S, h = block(S, h)
-
-        if puzzle_ids is not None:
-            h = h[:, 1:]
 
         return self.unembed(self.norm(h))

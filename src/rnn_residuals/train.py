@@ -1,44 +1,52 @@
 import math
 import os
+import urllib.request
 from dataclasses import asdict
 
 import torch
 from accelerate import Accelerator
-from datasets import load_dataset
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
 from rnn_residuals.config import TrainConfig, TransformerConfig
 from rnn_residuals.nn.layers import LoopedTransformer
 
+SHAKESPEARE_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
 
-class PackedTokens(IterableDataset):
-    def __init__(
-        self,
-        tokenizer,
-        n_ctx: int,
-        dataset: str = "roneneldan/TinyStories",
-    ) -> None:
+
+def load_shakespeare(data_dir: str) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
+    path = os.path.join(data_dir, "tinyshakespeare.txt")
+    if not os.path.exists(path):
+        os.makedirs(data_dir, exist_ok=True)
+        urllib.request.urlretrieve(SHAKESPEARE_URL, path)
+
+    with open(path) as f:
+        text = f.read()
+
+    chars = sorted(set(text))
+    stoi = {c: i for i, c in enumerate(chars)}
+    data = torch.tensor([stoi[c] for c in text], dtype=torch.long)
+    n = int(0.9 * len(data))
+
+    return data[:n], data[n:], chars
+
+
+class RandomWindows(IterableDataset):
+    def __init__(self, data: torch.Tensor, n_ctx: int, seed: int = 0) -> None:
         super().__init__()
 
-        self.tokenizer = tokenizer
+        self.data = data
         self.n_ctx = n_ctx
-        self.dataset = dataset
+        self.seed = seed
 
     def __iter__(self):
-        ds = load_dataset(self.dataset, split="train", streaming=True)
-        ds = ds.shuffle(seed=0, buffer_size=10_000)
+        worker = get_worker_info()
+        g = torch.Generator().manual_seed(self.seed + (worker.id if worker else 0))
 
-        buf = []
-        for ex in ds:
-            buf.extend(self.tokenizer(ex["text"])["input_ids"])
-            buf.append(self.tokenizer.eos_token_id)
-
-            while len(buf) >= self.n_ctx + 1:
-                yield torch.tensor(buf[: self.n_ctx + 1])
-                buf = buf[self.n_ctx + 1 :]
+        while True:
+            i = torch.randint(len(self.data) - self.n_ctx - 1, (1,), generator=g).item()
+            yield self.data[i : i + self.n_ctx + 1]
 
 
 def lr_lambda(cfg: TrainConfig):
@@ -62,10 +70,22 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
         init_kwargs={"wandb": {"name": train_cfg.wandb_name}},
     )
 
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    train_data, val_data, chars = load_shakespeare(train_cfg.data_dir)
+    assert len(chars) == model_cfg.n_vocab, f"n_vocab must be {len(chars)}"
+
     loader = DataLoader(
-        PackedTokens(tokenizer, model_cfg.n_ctx), batch_size=train_cfg.batch_size
+        RandomWindows(train_data, model_cfg.n_ctx), batch_size=train_cfg.batch_size
     )
+    g = torch.Generator().manual_seed(0)
+    starts = torch.randint(
+        len(val_data) - model_cfg.n_ctx - 1,
+        (train_cfg.eval_batches, train_cfg.batch_size),
+        generator=g,
+    )
+    val_batches = [
+        torch.stack([val_data[i : i + model_cfg.n_ctx + 1] for i in row])
+        for row in starts.tolist()
+    ]
 
     model = LoopedTransformer(model_cfg)
 
@@ -114,6 +134,22 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
                 )
             pbar.set_postfix(loss=f"{stats['loss']:.4f}")
 
+        if step % train_cfg.eval_every == 0 or step == train_cfg.n_batches:
+            model.eval()
+            with torch.no_grad():
+                val_loss = sum(
+                    F.cross_entropy(
+                        model(b[:, :-1].to(accelerator.device)).flatten(0, 1).float(),
+                        b[:, 1:].flatten().to(accelerator.device),
+                    ).item()
+                    for b in val_batches
+                ) / len(val_batches)
+            model.train()
+
+            accelerator.log({"val_loss": val_loss}, step=step)
+            if accelerator.is_main_process:
+                pbar.write(f"step {step} | val_loss {val_loss:.4g}")
+
         if step % train_cfg.save_every == 0 or step == train_cfg.n_batches:
             accelerator.wait_for_everyone()
             os.makedirs(train_cfg.save_path, exist_ok=True)
@@ -121,6 +157,7 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
                 {
                     "model": accelerator.unwrap_model(model).state_dict(),
                     "cfg": asdict(model_cfg),
+                    "chars": chars,
                     "step": step,
                 },
                 os.path.join(train_cfg.save_path, f"step_{step}.pt"),

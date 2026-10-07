@@ -3,7 +3,8 @@ from dataclasses import fields
 
 import yaml
 
-from rnn_residuals.config import ArcConfig, TrainConfig, TransformerConfig
+from rnn_residuals.config import TrainConfig, TransformerConfig
+from rnn_residuals.train import train
 
 
 def build(cls, raw: dict):
@@ -22,11 +23,4 @@ def main() -> None:
     model_cfg = build(TransformerConfig, raw["model"])
     train_cfg = build(TrainConfig, raw["train"])
 
-    if "arc" in raw:
-        from rnn_residuals.train_arc import train
-
-        train(model_cfg, train_cfg, build(ArcConfig, raw["arc"]))
-    else:
-        from rnn_residuals.train import train
-
-        train(model_cfg, train_cfg)
+    train(model_cfg, train_cfg)
