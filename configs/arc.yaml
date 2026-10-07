@@ -18,7 +18,7 @@ train:
   lr: 1e-4
   n_warmup: 500
   n_batches: 10000
-  batch_size: 128
+  batch_size: 64
   wt_decay: 0.1
   grad_norm: 1.0
   mixed_precision: bf16
