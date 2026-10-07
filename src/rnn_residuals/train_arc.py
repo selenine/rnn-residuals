@@ -118,6 +118,11 @@ def train(
                     "exact_acc": correct.all(-1).float().mean().item(),
                 }
                 accelerator.log(stats, step=step)
+                if accelerator.is_main_process:
+                    pbar.write(
+                        f"step {step} | "
+                        + " | ".join(f"{k} {v:.4g}" for k, v in stats.items())
+                    )
                 pbar.set_postfix(
                     loss=f"{stats['loss']:.4f}", exact=f"{stats['exact_acc']:.3f}"
                 )
@@ -133,7 +138,10 @@ def train(
                     accelerator.log(
                         {f"eval/{k}": v for k, v in scores.items()}, step=step
                     )
-                    pbar.write(f"step {step}: {scores}")
+                    pbar.write(
+                        f"step {step} | "
+                        + " | ".join(f"eval/{k} {v:.4g}" for k, v in scores.items())
+                    )
                 accelerator.wait_for_everyone()
 
             if step % train_cfg.save_every == 0 or step == train_cfg.n_batches:

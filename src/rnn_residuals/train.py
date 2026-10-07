@@ -107,6 +107,11 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
                 "lr": sched.get_last_lr()[0],
             }
             accelerator.log(stats, step=step)
+            if accelerator.is_main_process:
+                pbar.write(
+                    f"step {step} | "
+                    + " | ".join(f"{k} {v:.4g}" for k, v in stats.items())
+                )
             pbar.set_postfix(loss=f"{stats['loss']:.4f}")
 
         if step % train_cfg.save_every == 0 or step == train_cfg.n_batches:
