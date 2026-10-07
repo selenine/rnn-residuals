@@ -17,7 +17,9 @@ from rnn_residuals.sample import generate
 SHAKESPEARE_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
 
 
-def load_shakespeare(data_dir: str) -> tuple[torch.Tensor, torch.Tensor, list[str]]:
+def load_shakespeare(
+    data_dir: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     path = os.path.join(data_dir, "tinyshakespeare.txt")
     if not os.path.exists(path):
         os.makedirs(data_dir, exist_ok=True)
@@ -29,9 +31,9 @@ def load_shakespeare(data_dir: str) -> tuple[torch.Tensor, torch.Tensor, list[st
     chars = sorted(set(text))
     stoi = {c: i for i, c in enumerate(chars)}
     data = torch.tensor([stoi[c] for c in text], dtype=torch.long)
-    n = int(0.9 * len(data))
+    n_train, n_val = int(0.9 * len(data)), int(0.95 * len(data))
 
-    return data[:n], data[n:], chars
+    return data[:n_train], data[n_train:n_val], data[n_val:], chars
 
 
 class RandomWindows(IterableDataset):
@@ -68,7 +70,7 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
         init_kwargs={"wandb": {"name": train_cfg.wandb_name}},
     )
 
-    train_data, val_data, chars = load_shakespeare(train_cfg.data_dir)
+    train_data, val_data, test_data, chars = load_shakespeare(train_cfg.data_dir)
     assert len(chars) == model_cfg.n_vocab, f"n_vocab must be {len(chars)}"
 
     loader = DataLoader(
@@ -84,6 +86,13 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
         torch.stack([val_data[i : i + model_cfg.n_ctx + 1] for i in row])
         for row in starts.tolist()
     ]
+    n_ctx = model_cfg.n_ctx
+    test_windows = torch.stack(
+        [
+            test_data[i * n_ctx : (i + 1) * n_ctx + 1]
+            for i in range((len(test_data) - 1) // n_ctx)
+        ]
+    )
 
     model = Transformer(model_cfg)
 
@@ -142,11 +151,21 @@ def train(model_cfg: TransformerConfig, train_cfg: TrainConfig) -> None:
                     ).item()
                     for b in val_batches
                 ) / len(val_batches)
+                test_nats = sum(
+                    F.cross_entropy(
+                        model(b[:, :-1].to(accelerator.device)).flatten(0, 1).float(),
+                        b[:, 1:].flatten().to(accelerator.device),
+                        reduction="sum",
+                    ).item()
+                    for b in test_windows.split(train_cfg.batch_size)
+                ) / (len(test_windows) * n_ctx)
             model.train()
 
-            accelerator.log({"val_loss": val_loss}, step=step)
+            accelerator.log({"val_loss": val_loss, "test_nats": test_nats}, step=step)
             if accelerator.is_main_process:
-                pbar.write(f"step {step} | val_loss {val_loss:.4g}")
+                pbar.write(
+                    f"step {step} | val_loss {val_loss:.4g} | test_nats {test_nats:.4g}"
+                )
 
                 if train_cfg.sample_tokens > 0:
                     sample = generate(
