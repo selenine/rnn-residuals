@@ -3,9 +3,9 @@ model:
   n_vocab: 65
   n_layers: 8
   n_heads: 4
-  d_model: 128
-  d_head: 32
-  d_mlp: 512
+  d_model: 64
+  d_head: 16
+  d_mlp: 256
   residual: attnres
 
 train:
@@ -13,7 +13,7 @@ train:
   n_warmup: 200
   n_batches: 5000
   batch_size: 64
-  wt_decay: 0.25
+  wt_decay: 1.0
   grad_norm: 1.0
   mixed_precision: "no"
   save_every: 1000
