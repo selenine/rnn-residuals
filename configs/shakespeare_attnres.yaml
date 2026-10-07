@@ -13,7 +13,7 @@ train:
   n_warmup: 200
   n_batches: 5000
   batch_size: 64
-  wt_decay: 0.1
+  wt_decay: 0.25
   grad_norm: 1.0
   mixed_precision: "no"
   save_every: 1000
