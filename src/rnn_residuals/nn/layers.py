@@ -102,18 +102,24 @@ class GDN2(nn.Module):
         n, d = cfg.n_heads, cfg.d_head
 
         self.Wqkv = nn.Linear(cfg.d_model, 3 * n * d, bias=False)
-        self.Wbc = nn.Linear(cfg.d_model, 2 * n * d, bias=True)
-        self.Wa = nn.Linear(cfg.d_model, n * d, bias=False)
-
         self.qk_bias = nn.Parameter(torch.randn(2 * n * d))
 
         nn.init.kaiming_normal_(self.Wqkv.weight)
         nn.init.zeros_(self.Wqkv.weight[: 2 * n * d])
-        nn.init.zeros_(self.Wa.weight)
-        nn.init.zeros_(self.Wbc.bias)
 
-        self.A_log = nn.Parameter(torch.zeros(n * d))
-        self.dt_bias = nn.Parameter(torch.full((n * d,), -18.0))
+        if cfg.use_alpha:
+            self.Wa = nn.Linear(cfg.d_model, n * d, bias=False)
+            nn.init.zeros_(self.Wa.weight)
+            self.A_log = nn.Parameter(torch.zeros(n * d))
+            self.dt_bias = nn.Parameter(torch.full((n * d,), -18.0))
+
+        if cfg.use_beta:
+            self.Wb = nn.Linear(cfg.d_model, n * d, bias=True)
+            nn.init.zeros_(self.Wb.bias)
+
+        if cfg.use_gamma:
+            self.Wc = nn.Linear(cfg.d_model, n * d, bias=True)
+            nn.init.zeros_(self.Wc.bias)
 
     def forward(
         self, S: torch.Tensor | None, z: torch.Tensor
@@ -124,20 +130,26 @@ class GDN2(nn.Module):
         q, k = (qk + self.qk_bias).view(b, s, 2, n, d).unbind(2)
         v = v.view(b, s, n, d)
         q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
-        bc = torch.sigmoid(self.Wbc(z).float())
-        beta, gamma = bc.view(b, s, 2, n, d).unbind(2)
-        dt = F.softplus(self.Wa(z).float() + self.dt_bias)
-        a = torch.exp(-self.A_log.exp() * dt).view(b, s, n, d)
+        if self.cfg.use_gamma:
+            v = torch.sigmoid(self.Wc(z).float()).view(b, s, n, d) * v
+        bk = k
+        if self.cfg.use_beta:
+            bk = torch.sigmoid(self.Wb(z).float()).view(b, s, n, d) * k
+
+        if self.cfg.use_alpha:
+            dt = F.softplus(self.Wa(z).float() + self.dt_bias)
+            a = torch.exp(-self.A_log.exp() * dt).view(b, s, n, d)
 
         with torch.autocast(z.device.type, enabled=False):
             # S <- (I - k (beta * k)^T) Diag(a) S + k (gamma * v)^T
-            write = k.unsqueeze(-1) * (gamma * v).unsqueeze(-2)
+            write = k.unsqueeze(-1) * v.unsqueeze(-2)
             if S is None:
                 S = write
             else:
-                S = a.unsqueeze(-1) * S
+                if self.cfg.use_alpha:
+                    S = a.unsqueeze(-1) * S
                 S = S - k.unsqueeze(-1) * torch.einsum(
-                    "...i,...ij->...j", beta * k, S
+                    "...i,...ij->...j", bk, S
                 ).unsqueeze(-2)
                 S = S + write
 

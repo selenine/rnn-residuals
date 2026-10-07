@@ -15,6 +15,9 @@ class TransformerConfig:
     n_puzzles: int = 0
     grad_ckpt: bool = False
     n_grad_loops: int | None = None
+    use_alpha: bool = True
+    use_beta: bool = True
+    use_gamma: bool = True
 
 
 @dataclass
